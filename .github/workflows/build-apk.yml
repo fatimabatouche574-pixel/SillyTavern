@@ -6,6 +6,7 @@ on:
       - main
       - master
       - release
+      - claude/android-apk-black-screen-6qav4d
   workflow_dispatch:
 
 jobs:
