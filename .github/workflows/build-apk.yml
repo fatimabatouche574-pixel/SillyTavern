@@ -41,6 +41,14 @@ jobs:
           mkdir -p android/app/src/main/assets/public
           cp -r public/* android/app/src/main/assets/public/
           cp capacitor.config.json android/app/src/main/assets/
+          echo '[]' > android/app/src/main/assets/capacitor.plugins.json
+          mkdir -p android/app/src/main/res/xml
+          cat << 'EOF' > android/app/src/main/res/xml/config.xml
+          <?xml version='1.0' encoding='utf-8'?>
+          <widget version="1.0.0" xmlns="http://www.w3.org/ns/widgets" xmlns:cdv="http://cordova.apache.org/ns/1.0">
+            <access origin="*" />
+          </widget>
+          EOF
           chmod +x android/gradlew
 
       - name: Build Android Debug APK
