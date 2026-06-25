@@ -36,6 +36,12 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # Only install what the build needs. The action's default package set
+          # includes the deprecated "tools" package, whose download has been
+          # failing on the runners ("Error on ZipFile unknown archive"), which
+          # aborted the whole job before Gradle ever ran.
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
 
       - name: Sync Capacitor Assets
         run: |
