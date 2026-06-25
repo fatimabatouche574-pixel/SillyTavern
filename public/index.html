@@ -2,6 +2,53 @@
 <html>
 
 <head>
+    <!-- Fatal-error overlay: turns a silent black screen into readable text. -->
+    <script>
+        (function () {
+            window.__stMode = 'unknown';
+            window.__stLastReq = '(none yet)';
+            function showError(title, msg) {
+                try {
+                    var el = document.getElementById('st-fatal');
+                    if (!el) {
+                        el = document.createElement('div');
+                        el.id = 'st-fatal';
+                        el.style.cssText = 'position:fixed;left:0;top:0;right:0;bottom:0;z-index:2147483647;background:#161616;color:#ff7676;font:12px/1.5 monospace;padding:16px;overflow:auto;white-space:pre-wrap;-webkit-user-select:text;user-select:text;';
+                        (document.body || document.documentElement).appendChild(el);
+                    }
+                    el.textContent =
+                        'SillyTavern could not start.\n' +
+                        '================================\n' +
+                        title + '\n\n' + msg + '\n\n' +
+                        '--------------------------------\n' +
+                        'mode: ' + window.__stMode + '\n' +
+                        'last request: ' + window.__stLastReq + '\n' +
+                        'url: ' + location.href + '\n' +
+                        'Capacitor: ' + (typeof window.Capacitor !== 'undefined') + '\n\n' +
+                        'Please screenshot this screen and send it.';
+                } catch (e) { /* ignore */ }
+            }
+            window.__stShowError = showError;
+            window.addEventListener('error', function (e) {
+                var m = (e.error && e.error.stack) ? e.error.stack : (e.message + ' @ ' + (e.filename || '?') + ':' + (e.lineno || '?'));
+                showError('Uncaught error:', m);
+            });
+            window.addEventListener('unhandledrejection', function (e) {
+                var r = e.reason;
+                showError('Unhandled promise rejection:', (r && r.stack) ? r.stack : String(r));
+            });
+            // Watchdog: if the app never finishes booting, say where it got stuck.
+            setTimeout(function () {
+                if (document.getElementById('st-fatal')) return;
+                var ready = document.body && document.body.classList && document.body.classList.contains('loaded');
+                var splash = document.querySelector('.splash-screen, #loader, #preloader');
+                if (!ready && splash) {
+                    showError('Startup timed out (still loading after 20s).',
+                        'The UI never finished initializing. The last network request handled is shown below.');
+                }
+            }, 20000);
+        })();
+    </script>
     <!-- Mobile API Bridge (must be first script to intercept fetch) -->
     <script src="scripts/mobile-api-bridge.js"></script>
     <title>SillyTavern</title>

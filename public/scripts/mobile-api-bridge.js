@@ -27,21 +27,30 @@
     'use strict';
 
     // ----------------------------------------------------------------- detect
-    // Enable when running inside Capacitor, from a file:// origin, or when
-    // explicitly forced via a localStorage flag (handy for testing in a normal
-    // browser: localStorage.setItem('st_force_mobile_api', 'true')).
-    const isMobileApp =
-        typeof window.Capacitor !== 'undefined' ||
-        window.location.protocol === 'capacitor:' ||
-        window.location.protocol === 'file:' ||
-        localStorage.getItem('st_force_mobile_api') === 'true';
-
-    if (!isMobileApp) {
-        console.log('[Mobile Bridge] Standard server-backed mode; bridge disabled.');
-        return;
+    // IMPORTANT: detection is LAZY (evaluated when a request actually fires),
+    // not at script-load time. Capacitor may not have injected `window.Capacitor`
+    // yet while this <head> script runs, so deciding now risks wrongly disabling
+    // the bridge -> /csrf-token hits the network -> black screen. By the time the
+    // app issues its first request (during init, after full load) Capacitor is
+    // ready, so the check is reliable.
+    function shouldEmulate() {
+        try {
+            if (localStorage.getItem('st_force_mobile_api') === 'false') return false;
+            if (localStorage.getItem('st_force_mobile_api') === 'true') return true;
+        } catch (e) { /* localStorage may be unavailable */ }
+        if (typeof window.Capacitor !== 'undefined') return true;
+        const proto = window.location.protocol;
+        if (proto === 'capacitor:' || proto === 'file:') return true;
+        // Capacitor Android with androidScheme:https serves from https://localhost
+        // (no port). A real ST server is virtually never at exactly that origin.
+        if (proto === 'https:' && window.location.hostname === 'localhost' &&
+            (window.location.port === '' || window.location.port === '443')) {
+            return true;
+        }
+        return false;
     }
 
-    console.log('[Mobile Bridge] Initializing serverless mode...');
+    console.log('[Mobile Bridge] Loaded; emulation decided per-request.');
 
     // Capture the real fetch *before* we override it. On Capacitor this is the
     // native-backed fetch (CapacitorHttp) which bypasses CORS for outbound calls.
@@ -220,7 +229,11 @@
         }
     }
 
-    const seedPromise = seedInitialData();
+    let seedPromise = null;
+    function ensureSeed() {
+        if (!seedPromise) seedPromise = seedInitialData();
+        return seedPromise;
+    }
 
     // ---------------------------------------------------------------- secrets
     // Stored shape: { [key]: [{ id, label, value, active }] }
@@ -478,7 +491,7 @@
 
         // -- settings -----------------------------------------------------------
         'POST:/api/settings/get': async () => {
-            await seedPromise;
+            await ensureSeed();
             const settingsStr = (await fsGet('settings')) || '{}';
             const d = await buildDefaultBundle();
             return {
@@ -697,8 +710,15 @@
         const isAppEndpoint = cleanPath.startsWith('/api/') ||
             cleanPath === '/csrf-token' || cleanPath === '/version';
 
-        if (!isAppEndpoint) {
+        // Decide emulation lazily, per request (see shouldEmulate comment above).
+        if (!isAppEndpoint || !shouldEmulate()) {
+            if (typeof window !== 'undefined') window.__stMode = isAppEndpoint ? 'passthrough' : window.__stMode;
             return originalFetch(resource, init);
+        }
+
+        if (typeof window !== 'undefined') {
+            window.__stMode = 'emulated (serverless)';
+            window.__stLastReq = ((init && init.method) || 'GET').toUpperCase() + ' ' + cleanPath;
         }
 
         const method = ((init && init.method) || (resource && resource.method) || 'GET').toUpperCase();
