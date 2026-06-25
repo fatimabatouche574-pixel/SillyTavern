@@ -1,0 +1,14 @@
+{
+	"appId": "com.sillytavern.app",
+	"appName": "SillyTavern",
+	"webDir": "public",
+	"server": {
+		"androidScheme": "https",
+		"allowNavigation": []
+	},
+	"plugins": {
+		"CapacitorHttp": {
+			"enabled": true
+		}
+	}
+}
