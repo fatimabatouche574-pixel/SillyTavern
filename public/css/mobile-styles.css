@@ -654,3 +654,165 @@
         height: unset;
     }
 }
+
+/* Phone app layout: keep these overrides limited to narrow mobile screens. */
+@media screen and (max-width: 768px) {
+
+    /* Mobile sizing tokens: centralize safe-area and input height math. */
+    :root {
+        --st-mobile-input-height: clamp(64px, 13dvh, 128px);
+        --st-mobile-safe-bottom: max(env(safe-area-inset-bottom), 8px);
+        --st-mobile-top-height: var(--topBarBlockSize);
+    }
+
+    /* Viewport lock: use dynamic viewport height to avoid browser chrome jumps. */
+    html,
+    body {
+        width: 100dvw;
+        height: 100dvh;
+        max-height: 100dvh;
+        overflow: hidden;
+    }
+
+    /* Top bar: keep the mobile header compact and pinned. */
+    #top-bar,
+    #top-settings-holder {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        width: 100dvw;
+        min-height: var(--st-mobile-top-height);
+        z-index: 3005;
+    }
+
+    /* Main shell: fill the phone viewport below the top bar. */
+    body:not(.waifuMode) #sheld {
+        position: fixed;
+        top: var(--st-mobile-top-height) !important;
+        left: 0 !important;
+        right: 0 !important;
+        bottom: 0;
+        width: 100dvw !important;
+        height: calc(100dvh - var(--st-mobile-top-height)) !important;
+        max-height: calc(100dvh - var(--st-mobile-top-height)) !important;
+        min-width: 0;
+        min-height: 0;
+        margin: 0;
+        padding: 0;
+    }
+
+    /* Chat scroll area: reserve space so messages never hide under the input. */
+    body:not(.waifuMode) #chat {
+        flex: 1 1 auto;
+        width: 100%;
+        max-height: none;
+        height: calc(100dvh - var(--st-mobile-top-height) - var(--st-mobile-input-height) - var(--st-mobile-safe-bottom));
+        padding-bottom: calc(var(--st-mobile-input-height) + var(--st-mobile-safe-bottom));
+        overscroll-behavior: contain;
+        scroll-padding-bottom: calc(var(--st-mobile-input-height) + var(--st-mobile-safe-bottom));
+    }
+
+    /* Input dock: keep the composer reachable above the browser bottom area. */
+    body:not(.waifuMode) #form_sheld {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        width: 100dvw;
+        min-height: calc(var(--st-mobile-input-height) + var(--st-mobile-safe-bottom));
+        margin: 0;
+        padding-bottom: var(--st-mobile-safe-bottom);
+        z-index: 3010;
+    }
+
+    /* Composer surface: make the fixed input feel like a mobile app toolbar. */
+    body:not(.waifuMode) #send_form {
+        min-height: var(--st-mobile-input-height);
+        max-height: calc(50dvh - var(--st-mobile-safe-bottom));
+        border-radius: 12px 12px 0 0;
+        align-content: center;
+    }
+
+    /* Composer row: keep buttons and textarea aligned in a single touch row. */
+    body:not(.waifuMode) #nonQRFormItems {
+        min-height: 44px;
+        align-items: flex-end;
+        column-gap: 4px;
+        padding: 4px;
+        box-sizing: border-box;
+    }
+
+    /* Message field: keep the textarea usable without growing over the chat. */
+    body:not(.waifuMode) #send_textarea {
+        min-height: 44px;
+        max-height: calc(40dvh - var(--st-mobile-safe-bottom));
+        line-height: 1.35;
+        resize: none;
+    }
+
+    /* Touch targets: make composer controls meet the 44px mobile minimum. */
+    #options_button,
+    #leftSendForm>div,
+    #rightSendForm>div:not(.mes_stop),
+    #send_form .mes_stop,
+    #rightSendForm>div:not(.mes_send).stscript_btn {
+        min-width: 44px;
+        min-height: 44px;
+        width: 44px;
+        height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    /* Drawer buttons: keep top entry points comfortable to tap. */
+    .drawer-icon {
+        min-width: 44px;
+        min-height: 44px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    /* Mobile drawers: keep side panels hidden until their existing toggle opens them. */
+    #left-nav-panel.closedDrawer,
+    #right-nav-panel.closedDrawer {
+        display: block;
+        height: 0 !important;
+        min-height: 0 !important;
+        max-height: 0 !important;
+        overflow: hidden;
+        pointer-events: none;
+    }
+
+    /* Mobile drawers: show opened panels as an overlay drawer below the top bar. */
+    #left-nav-panel.openDrawer,
+    #right-nav-panel.openDrawer {
+        position: fixed;
+        top: var(--st-mobile-top-height) !important;
+        left: 0 !important;
+        right: 0 !important;
+        width: 100dvw !important;
+        min-width: 100dvw !important;
+        max-width: 100dvw !important;
+        height: calc(100dvh - var(--st-mobile-top-height) - var(--st-mobile-safe-bottom)) !important;
+        max-height: calc(100dvh - var(--st-mobile-top-height) - var(--st-mobile-safe-bottom)) !important;
+        overflow-y: auto;
+        border-radius: 0 0 16px 16px;
+        pointer-events: auto;
+        z-index: 3008;
+    }
+
+    /* Drawer content: leave room at the bottom for safe-area gestures. */
+    #left-nav-panel.openDrawer .scrollableInner,
+    #right-nav-panel.openDrawer .scrollableInner {
+        max-height: calc(100dvh - var(--st-mobile-top-height) - var(--st-mobile-safe-bottom) - 16px);
+        padding-bottom: var(--st-mobile-safe-bottom);
+    }
+
+    /* Floating drawers: prevent secondary panels from exceeding the phone viewport. */
+    .drawer-content.openDrawer {
+        max-height: calc(100dvh - var(--st-mobile-top-height) - var(--st-mobile-safe-bottom));
+    }
+}
