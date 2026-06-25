@@ -38,19 +38,35 @@ jobs:
 
       - name: Sync Capacitor Assets
         run: |
+          set +e
           chmod +x android/gradlew
-          echo "=== Node version ==="
-          node --version
-          echo "=== Cap CLI location ==="
-          ls -la node_modules/.bin/cap || echo "cap not found in node_modules/.bin"
-          ls -la node_modules/@capacitor/cli/bin/capacitor.js || echo "capacitor.js not found"
-          echo "=== capacitor.settings.gradle ==="
-          cat android/capacitor.settings.gradle
-          echo "=== Running cap sync ==="
-          node node_modules/@capacitor/cli/bin/capacitor.js sync android --verbose 2>&1 || true
-          echo "=== Checking if assets were copied ==="
-          ls -la android/app/src/main/assets/ || echo "assets dir missing"
-          ls android/app/src/main/assets/public/ | head -10 || echo "public dir missing"
+          echo "=== Node version ===" >> sync_debug.log
+          node --version >> sync_debug.log 2>&1
+          echo "=== Cap CLI check ===" >> sync_debug.log
+          ls -la node_modules/.bin/cap >> sync_debug.log 2>&1
+          ls -la node_modules/@capacitor/cli/bin/capacitor.js >> sync_debug.log 2>&1
+          echo "=== capacitor.settings.gradle ===" >> sync_debug.log
+          cat android/capacitor.settings.gradle >> sync_debug.log 2>&1
+          echo "=== capacitor.config.json ===" >> sync_debug.log
+          cat capacitor.config.json >> sync_debug.log 2>&1
+          echo "=== Running cap sync ===" >> sync_debug.log
+          node node_modules/@capacitor/cli/bin/capacitor.js sync android 2>&1 | tee -a sync_debug.log
+          SYNC_EXIT=$?
+          echo "=== cap sync exit code: $SYNC_EXIT ===" >> sync_debug.log
+          echo "=== Assets check ===" >> sync_debug.log
+          ls -laR android/app/src/main/assets/ >> sync_debug.log 2>&1 || true
+          echo "=== Res xml check ===" >> sync_debug.log
+          ls -la android/app/src/main/res/xml/ >> sync_debug.log 2>&1 || true
+          cat sync_debug.log
+          exit $SYNC_EXIT
+
+      - name: Upload Debug Log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sync-debug-log
+          path: sync_debug.log
+          retention-days: 3
 
       - name: Build Android Debug APK
         run: |
