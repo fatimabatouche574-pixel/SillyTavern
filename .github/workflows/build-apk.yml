@@ -39,7 +39,18 @@ jobs:
       - name: Sync Capacitor Assets
         run: |
           chmod +x android/gradlew
-          npx cap sync android
+          echo "=== Node version ==="
+          node --version
+          echo "=== Cap CLI location ==="
+          ls -la node_modules/.bin/cap || echo "cap not found in node_modules/.bin"
+          ls -la node_modules/@capacitor/cli/bin/capacitor.js || echo "capacitor.js not found"
+          echo "=== capacitor.settings.gradle ==="
+          cat android/capacitor.settings.gradle
+          echo "=== Running cap sync ==="
+          node node_modules/@capacitor/cli/bin/capacitor.js sync android --verbose 2>&1 || true
+          echo "=== Checking if assets were copied ==="
+          ls -la android/app/src/main/assets/ || echo "assets dir missing"
+          ls android/app/src/main/assets/public/ | head -10 || echo "public dir missing"
 
       - name: Build Android Debug APK
         run: |
