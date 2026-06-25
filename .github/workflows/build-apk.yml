@@ -38,7 +38,7 @@ jobs:
 
       - name: Sync Capacitor Assets
         run: |
-          npx cap sync
+          npx --yes cap sync
 
       - name: Build Android Debug APK
         run: |
