@@ -29,24 +29,58 @@
                 } catch (e) { /* ignore */ }
             }
             window.__stShowError = showError;
+
+            // Only surface a fatal screen when the app TRULY fails to boot.
+            // Big apps throw the odd non-fatal error during init (e.g. a jQuery
+            // widget timing error) yet still finish; blanking the screen on those
+            // would be a false alarm. So we record the first error and only
+            // display it if the app hasn't become usable shortly after.
+            var firstError = null;
+            var sawSplash = false;
+            window.__stBooted = false;
+
+            function isBooted() {
+                if (window.__stBooted) return true;
+                var splash = document.querySelector('.splash-screen');
+                if (splash) { sawSplash = true; return false; }
+                // Booted == the splash has appeared and gone, or the main chat UI
+                // is present (covers the first-run onboarding popup case too).
+                var ui = document.getElementById('send_textarea') || document.getElementById('send_form');
+                if (sawSplash && !splash) { window.__stBooted = true; return true; }
+                if (ui && !splash && document.body && document.body.children.length > 3) {
+                    // Heuristic fallback; only trust once some time has passed.
+                }
+                return false;
+            }
+            // Keep polling so __stBooted flips as soon as the UI is up.
+            var bootPoll = setInterval(function () {
+                if (isBooted()) clearInterval(bootPoll);
+            }, 400);
+
+            function recordError(title, msg) {
+                if (!firstError) firstError = { title: title, msg: msg };
+                // Give the app a few seconds to recover; only then blank the screen.
+                setTimeout(function () {
+                    if (!isBooted() && firstError) showError(firstError.title, firstError.msg);
+                }, 4000);
+            }
             window.addEventListener('error', function (e) {
                 var m = (e.error && e.error.stack) ? e.error.stack : (e.message + ' @ ' + (e.filename || '?') + ':' + (e.lineno || '?'));
-                showError('Uncaught error:', m);
+                recordError('Uncaught error:', m);
             });
             window.addEventListener('unhandledrejection', function (e) {
                 var r = e.reason;
-                showError('Unhandled promise rejection:', (r && r.stack) ? r.stack : String(r));
+                recordError('Unhandled promise rejection:', (r && r.stack) ? r.stack : String(r));
             });
-            // Watchdog: if the app never finishes booting, say where it got stuck.
+            // Final watchdog: still stuck on the loader after 25s with no UI.
             setTimeout(function () {
-                if (document.getElementById('st-fatal')) return;
-                var ready = document.body && document.body.classList && document.body.classList.contains('loaded');
-                var splash = document.querySelector('.splash-screen, #loader, #preloader');
-                if (!ready && splash) {
-                    showError('Startup timed out (still loading after 20s).',
-                        'The UI never finished initializing. The last network request handled is shown below.');
+                if (document.getElementById('st-fatal') || isBooted()) return;
+                if (firstError) { showError(firstError.title, firstError.msg); return; }
+                if (document.querySelector('.splash-screen') || sawSplash === false) {
+                    showError('Startup timed out (no UI after 25s).',
+                        'The app never finished initializing. The last handled request is shown below.');
                 }
-            }, 20000);
+            }, 25000);
         })();
     </script>
     <!-- Mobile API Bridge (must be first script to intercept fetch) -->

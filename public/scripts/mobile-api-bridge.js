@@ -185,11 +185,16 @@
         const openai = await readPresetType('openai_preset');
         const textgen = await readPresetType('textgen_preset');
 
+        // Background image filenames (strip the "backgrounds/" path prefix).
+        const backgroundFiles = (byType['background'] || [])
+            .map(f => f.split('/').pop());
+
         cachedDefaults = {
             kobold,
             novel,
             openai,
             textgen,
+            backgroundFiles,
             context: await readParsedType('context'),
             instruct: await readParsedType('instruct'),
             sysprompt: await readParsedType('sysprompt'),
@@ -480,6 +485,8 @@
                 pkgVersion: (pkg && pkg.version) || 'mobile',
                 gitRevision: null,
                 gitBranch: null,
+                commitDate: null,
+                isLatest: true,
             };
         },
         'POST:/api/ping': async () => ({ ok: true }),
@@ -581,31 +588,51 @@
             return list;
         },
         'POST:/api/characters/get': async (url, init) => {
-            const { avatar } = JSON.parse(init.body);
+            const body = init && init.body ? JSON.parse(init.body) : {};
+            const avatar = body.avatar_url || body.avatar;
             return (await fsGet('character:' + avatar)) || {};
         },
+        // create/edit are multipart/form-data, not JSON.
         'POST:/api/characters/create': async (url, init) => {
-            const body = init && init.body ? JSON.parse(init.body) : {};
-            const avatar = (body.ch_name ? body.ch_name.replace(/[^a-z0-9]/gi, '_') : 'char') + '_' + makeSecretId() + '.png';
-            const char = buildCharacterObject(body, avatar);
+            const body = await readFormOrJson(init);
+            const safeName = (body.ch_name || 'char').replace(/[^a-z0-9]/gi, '_');
+            const avatar = safeName + '_' + makeSecretId() + '.png';
+            const char = await buildCharacterObject(body, avatar);
             await fsSet('character:' + avatar, char);
-            return avatar;
+            // Backend returns the avatar filename as plain text.
+            return new Response(avatar, { status: 200, headers: { 'Content-Type': 'text/plain' } });
         },
         'POST:/api/characters/edit': async (url, init) => {
-            const body = init && init.body ? JSON.parse(init.body) : {};
+            const body = await readFormOrJson(init);
             const avatar = body.avatar_url || body.avatar;
             if (avatar) {
                 const existing = (await fsGet('character:' + avatar)) || {};
-                const updated = buildCharacterObject(body, avatar, existing);
+                const updated = await buildCharacterObject(body, avatar, existing);
                 await fsSet('character:' + avatar, updated);
             }
-            return { ok: true };
+            return new Response('', { status: 200 });
+        },
+        'POST:/api/characters/rename': async (url, init) => {
+            const body = init && init.body ? JSON.parse(init.body) : {};
+            const oldAvatar = body.avatar_url;
+            const newName = body.new_name;
+            const existing = oldAvatar ? await fsGet('character:' + oldAvatar) : null;
+            if (existing) {
+                const newAvatar = newName.replace(/[^a-z0-9]/gi, '_') + '_' + makeSecretId() + '.png';
+                existing.name = newName;
+                existing.avatar = newAvatar;
+                if (existing.data) existing.data.name = newName;
+                await fsSet('character:' + newAvatar, existing);
+                await fsDelete('character:' + oldAvatar);
+                return { avatar: newAvatar };
+            }
+            return { avatar: oldAvatar };
         },
         'POST:/api/characters/delete': async (url, init) => {
             const body = init && init.body ? JSON.parse(init.body) : {};
             const avatar = body.avatar_url || body.avatar;
             if (avatar) await fsDelete('character:' + avatar);
-            return { ok: true };
+            return new Response('', { status: 200 });
         },
         'POST:/api/characters/chats': async () => [],
 
@@ -633,8 +660,28 @@
 
         // -- avatars / backgrounds / groups (lists) -----------------------------
         'POST:/api/avatars/get': async () => [],
-        'POST:/api/backgrounds/all': async () => [],
+        'POST:/api/backgrounds/all': async () => {
+            const d = await buildDefaultBundle();
+            const images = (d.backgroundFiles || []).map(filename => ({ filename, isAnimated: false }));
+            return { images, config: { width: 160, height: 90 } };
+        },
+        'POST:/api/backgrounds/delete': async () => ({ ok: true }),
+        'POST:/api/backgrounds/rename': async () => ({ ok: true }),
+        'POST:/api/backgrounds/folders': async () => ({ folders: [] }),
+        'POST:/api/image-metadata/all': async () => ({ images: {} }),
+        'POST:/api/image-metadata/folders/set-thumbnails': async () => ({ ok: true }),
         'POST:/api/groups/all': async () => [],
+        'POST:/api/chats/recent': async () => [],
+
+        // -- extensions (none bundled in serverless mode) -----------------------
+        'GET:/api/extensions/discover': async () => [],
+        'POST:/api/extensions/discover': async () => [],
+
+        // -- horde (not supported serverless; empty lists so init doesn't crash) -
+        'POST:/api/horde/text-models': async () => [],
+        'POST:/api/horde/text-workers': async () => [],
+        'POST:/api/horde/status': async () => ({}),
+        'POST:/api/horde/user-info': async () => ({}),
 
         // -- generation ---------------------------------------------------------
         'POST:/api/backends/chat-completions/generate': async (url, init) => {
@@ -649,41 +696,107 @@
         },
     };
 
-    // Assemble a character card object from a create/edit form post.
-    function buildCharacterObject(body, avatar, existing) {
+    // Read a request body that may be multipart/form-data (character create/edit)
+    // or JSON. Returns a plain object of field name -> value. File fields are
+    // converted to data URLs (used for avatars).
+    async function readFormOrJson(init) {
+        const body = init && init.body;
+        if (!body) return {};
+        if (typeof FormData !== 'undefined' && body instanceof FormData) {
+            const out = {};
+            for (const [k, v] of body.entries()) {
+                if (v && typeof v === 'object' && typeof v.arrayBuffer === 'function') {
+                    // A File/Blob (e.g. the avatar image) -> data URL.
+                    out[k] = await blobToDataUrl(v);
+                } else if (out[k] !== undefined) {
+                    // Repeated field (e.g. alternate_greetings) -> array.
+                    out[k] = [].concat(out[k], v);
+                } else {
+                    out[k] = v;
+                }
+            }
+            return out;
+        }
+        if (typeof body === 'string') {
+            try { return JSON.parse(body); } catch { return {}; }
+        }
+        return {};
+    }
+
+    function blobToDataUrl(blob) {
+        return new Promise((resolve) => {
+            try {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result);
+                reader.onerror = () => resolve('');
+                reader.readAsDataURL(blob);
+            } catch { resolve(''); }
+        });
+    }
+
+    // Assemble a full v2 character card object from a create/edit form post.
+    async function buildCharacterObject(body, avatar, existing) {
         existing = existing || {};
-        const name = body.ch_name || body.name || existing.name || 'Unnamed';
+
+        // If the form carried a full card as json_data, use it as the base.
+        let json = {};
+        if (body.json_data) {
+            try { json = JSON.parse(body.json_data); } catch { json = {}; }
+        }
+        const jdata = (json && json.data) || json || {};
+
+        const pick = (field) => body[field] ?? jdata[field] ?? existing?.data?.[field] ?? existing[field] ?? '';
+        const name = body.ch_name || json.name || jdata.name || existing.name || 'Unnamed';
+
+        const data = {
+            name,
+            description: pick('description'),
+            personality: pick('personality'),
+            scenario: pick('scenario'),
+            first_mes: pick('first_mes'),
+            mes_example: pick('mes_example'),
+            creator_notes: body.creator_notes ?? jdata.creator_notes ?? '',
+            system_prompt: body.system_prompt ?? jdata.system_prompt ?? '',
+            post_history_instructions: body.post_history_instructions ?? jdata.post_history_instructions ?? '',
+            tags: Array.isArray(jdata.tags) ? jdata.tags : [],
+            creator: body.creator ?? jdata.creator ?? '',
+            character_version: body.character_version ?? jdata.character_version ?? '',
+            alternate_greetings: [].concat(body.alternate_greetings || jdata.alternate_greetings || existing?.data?.alternate_greetings || []).filter(Boolean),
+            extensions: jdata.extensions || existing?.data?.extensions || {},
+        };
+
+        // Keep a usable avatar reference: a data URL from the uploaded file if
+        // present, otherwise the existing one, otherwise the filename.
+        const avatarRef = (typeof body.avatar === 'string' && body.avatar.startsWith('data:'))
+            ? body.avatar
+            : (existing.avatarImage || avatar);
+
         return {
             name,
             avatar,
-            description: body.description ?? existing.description ?? '',
-            personality: body.personality ?? existing.personality ?? '',
-            scenario: body.scenario ?? existing.scenario ?? '',
-            first_mes: body.first_mes ?? existing.first_mes ?? '',
-            mes_example: body.mes_example ?? existing.mes_example ?? '',
-            creatorcomment: body.creator_notes ?? existing.creatorcomment ?? '',
-            tags: existing.tags || [],
+            avatarImage: avatarRef,
+            chat: existing.chat || (name + ' - ' + getTimestampName()),
+            description: data.description,
+            personality: data.personality,
+            scenario: data.scenario,
+            first_mes: data.first_mes,
+            mes_example: data.mes_example,
+            creatorcomment: data.creator_notes,
+            tags: data.tags,
             talkativeness: body.talkativeness ?? existing.talkativeness ?? '0.5',
-            fav: existing.fav || false,
-            create_date: existing.create_date || '',
-            chat: existing.chat || (name + ' - chat'),
-            data: {
-                name,
-                description: body.description ?? existing.description ?? '',
-                personality: body.personality ?? existing.personality ?? '',
-                scenario: body.scenario ?? existing.scenario ?? '',
-                first_mes: body.first_mes ?? existing.first_mes ?? '',
-                mes_example: body.mes_example ?? existing.mes_example ?? '',
-                creator_notes: body.creator_notes ?? '',
-                system_prompt: body.system_prompt ?? '',
-                post_history_instructions: body.post_history_instructions ?? '',
-                tags: [],
-                creator: body.creator ?? '',
-                character_version: body.character_version ?? '',
-                alternate_greetings: existing?.data?.alternate_greetings || [],
-                extensions: existing?.data?.extensions || {},
-            },
+            fav: (body.fav === 'true' || body.fav === true) || existing.fav || false,
+            create_date: existing.create_date || getTimestampName(),
+            spec: 'chara_card_v2',
+            spec_version: '2.0',
+            data,
+            json_data: JSON.stringify({ spec: 'chara_card_v2', spec_version: '2.0', data }),
         };
+    }
+
+    function getTimestampName() {
+        // Avoid Date.now()/new Date() (blocked in some harnesses); performance
+        // clock is monotonic and good enough for a unique chat file name.
+        return 'chat_' + (performance.now() | 0);
     }
 
     // Endpoints whose callers expect a JSON array when we have nothing to return.
@@ -719,6 +832,9 @@
         if (typeof window !== 'undefined') {
             window.__stMode = 'emulated (serverless)';
             window.__stLastReq = ((init && init.method) || 'GET').toUpperCase() + ' ' + cleanPath;
+            // Lightweight diagnostic trail (bounded) of handled endpoints.
+            (window.__stReqLog = window.__stReqLog || []).push(window.__stLastReq);
+            if (window.__stReqLog.length > 200) window.__stReqLog.shift();
         }
 
         const method = ((init && init.method) || (resource && resource.method) || 'GET').toUpperCase();
