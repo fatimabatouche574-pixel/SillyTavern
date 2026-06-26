@@ -49,6 +49,14 @@ jobs:
           mkdir -p android/app/src/main/assets/public
           cp -r public/* android/app/src/main/assets/public/
 
+      - name: Bundle web libraries (webpack)
+        # public/lib.js imports npm packages (lodash, fuse.js, ...) that the
+        # browser can't resolve as bare specifiers. The server normally bundles
+        # this on the fly; for the APK we must do it at build time. This
+        # overwrites the copied raw lib.js with a self-contained ES module.
+        run: |
+          node build-mobile-lib.mjs
+
       - name: Build Android Debug APK
         run: |
           cd android
